@@ -13,7 +13,7 @@
   後述の通り、AWS アカウントのルートユーザーとして使用できるメールアドレスは重複や再利用ができないものとなっています。  
   すでに別の AWS アカウントをお持ちでそのルートユーザー用に使用しているメールアドレスや、過去に使用していたメールアドレスは利用できないため注意が必要です。
 
-> [!Note]
+> [!Tip]
 >
 > Gmail をお使いの場合、2024/08/01 現在、エイリアスを使用することで、異なるメールアドレスとして利用することが可能です。
 > 複数の AWS アカウント発行の必要があり、ルートユーザー用のメールアドレスを複数用意できないような場合に有用です。
@@ -55,5 +55,32 @@
    8. State, Province, or Region：州や地域が入力想定となっています。  
       日本の住所であれば都道府県名の入力が適切かと考えられます。
    9. Postal Code：郵便番号です
-7. Sign up for AWS 「Billing Information」ページへ遷移しますので、クレジットカード情報を入力します。
-8. 
+7. Sign up for AWS 「Billing Information」ページへ遷移しますので、請求先情報を入力し、「Verify and Continue (step 3 of 5)」ボタンをクリックします。
+   1. Billing country：請求先の国を選択します
+   2. Credit or Debit card number：クレジットカードあるいはデビットカードの番号を入力します
+   3. Expiration date：カードの有効期限を入力します
+   4. Security code：クレジットカードの CVV や CVC と呼ばれる数字を入力します。  
+      Amarican Express のカードであればカード券面表側の4桁の数字、その他のカードであれば裏面の署名欄に記載の3桁の数字が相当しますが、場合によっては本項目が入力不要（＜2＞のクレジットカード番号を入力後に非活性となる場合もあります）
+   5. Cardholder's name：カード名義人の氏名を入力します
+   6. Billing address：請求先住所  
+      デフォルトでは、前画面の「Contact Information」で入力した情報が反映されチェックされている状態となります。  
+      請求先住所を変更する必要がある場合は「Use a new address」にチェックを入れ、住所情報を入力します
+8. Sign up for AWS 「Confirm your identity」画面へ遷移しますので、適宜入力し「Send SMS (step 4 of 5)」ボタン（選択内容によっては「Call me now (step 4 of 5)」ボタン）をクリックします。
+   1. How should we send you the verification code?：検証用コードを受け取る方法を選択します。  
+      Text message (SMS) を受信するか Voice call を受ける方法のいずれかとなります
+   2. Country or region code：電話番号の国コードを選択します。日本国内であれば +81 となります。
+   3. Phone number：電話番号を入力します。
+      - Ext：内線番号が必要な場合に入力します
+   4. Type the characters as shown above：Security check 欄に表示されている文字列を入力します
+9. Sign up for AWS 「Confirm your identity」画面へ遷移しますので、SMS あるいは Voice Call で受け取った番号を入力し「Continue (step 4 of 5)」ボタンをクリックします
+10. Sign up for AWS「Select a support plan」画面へ遷移します。適宜サポートプランを選択し「Complete sign up」ボタンをクリックします  
+    ここでは、AWS サポートのプランを選択することとなりますが、有償のサポートプランが必要ない場合は、一番左側の「Basic support - Free」で構いません
+11. おめでとうございます。AWS にサインアップしていただきありがとうございます。と書かれた画面に遷移すれば正しく AWS アカウントが開設されています。  
+    「AWS マネジメントコンソール にお進みください」ボタンをクリックして、AWS マネジメントコンソールにログインすることが可能です。
+
+> [!Note]
+>
+> AWS アカウント作成の流れを[キャプチャ付きで解説しているページ](https://aws.amazon.com/jp/register-flow/)が AWS 公式で用意されています
+>
+> ただし、AWS の今後の開発状況によって UI の変更が発生する可能性がありますのでご留意ください
+
