@@ -6,19 +6,19 @@
 
 ## 想定するゴール
 
-| #      | -                                                            |
+| #      | ゴール                                                       |
 | ------ | ------------------------------------------------------------ |
-| 第一回 | raspberry pi pico w の設定方法を理解する<br />Wi-Fi 設定を投入し接続することができる<br />raspberry pi pico w の内部センサーで取得可能な情報を IoT Core に送信できる |
+| 第一回 | raspberry pi pico w の設定方法を理解する。<br />Wi-Fi 設定を投入し接続することができる。<br />raspberry pi pico w の内部センサーで取得可能な情報を IoT Core に送信できる。 |
 
 ## 準備いただく物
 
 ### Raspberry Pi Pico W
 
-Raspberry Pi Pico は Linux OS をインストールできる Raspberry Pi とは異なり RP2040マイコンを搭載した開発基板で、C/C++ SDK、もしくは公式に提供されているMicroPythonインタプリタを使った開発が可能。
+Raspberry Pi Pico は Linux OS をインストールできる Raspberry Pi とは異なり RP2040マイコンを搭載した開発基板で、C/C++ SDK、もしくは公式に提供されているMicroPython インタプリタを使った開発が可能です。
 
-無線チップの有無の違いにより、異なる型番が用意されているが、無線LAN を利用した通信を用いて容易に成功体験を得やすい Raspberry Pi Pico W を利用したい。
+無線チップの有無の違いにより、異なる型番が用意されていますが、無線LAN を利用した通信を用いて容易に成功体験を得やすい Raspberry Pi Pico W を利用したいと考えています。
 
-なお、ピンヘッダ実装済みの Raspberry Pi Pico WH と、自身でのピンヘッダの用意やはんだ付けが必要な Raspberry Pi Pico W の2種類が用意されているが、ご自身での実装ができる方は Raspberry Pi Pico W でも構いません。
+なお、ピンヘッダ実装済みの Raspberry Pi Pico WH と、自身でのピンヘッダの用意やはんだ付けが必要な Raspberry Pi Pico W の2種類が用意されていますが、ご自身での実装ができる方は Raspberry Pi Pico W でも構いません。
 
 #### スイッチサイエンスでの参考価格
 
@@ -47,6 +47,6 @@ Raspberry Pi Pico W 側は Micro USB 2.0 Type-B となっているため、片�
 
 ### AWS アカウント
 
-ご自身で自由に使える AWS アカウントをご用意ください
+ご自身で自由に使える AWS アカウントをご用意ください。
 
 また、お持ちでなくこれからご用意される方、その他不正利用や高額使用を避けるための推奨設定をご確認になりたい方は [付録](./appendix/) を参照ください。
