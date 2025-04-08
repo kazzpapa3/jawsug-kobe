@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+    body {
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f5f5f5;
+        color: #333;
+    }
+    .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background-color: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        padding: 30px;
+    }
+    h1 {
+        text-align: center;
+        margin-bottom: 30px;
+    }
+    .image-detail {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    .image-container {
+        width: 100%;
+        margin-bottom: 20px;
+        text-align: center;
+    }
+    .image-container img {
+        max-width: 100%;
+        max-height: 500px;
+        border-radius: 4px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+    .metadata {
+        width: 100%;
+        margin: 20px 0;
+        padding: 20px;
+        background-color: #f9f9f9;
+        border-radius: 8px;
+    }
+    .metadata p {
+        margin: 10px 0;
+        font-size: 16px;
+    }
+    .like-count {
+        font-weight: bold;
+        color: #e74c3c;
+        font-size: 18px;
+    }
+    .qr-code {
+        margin: 20px 0;
+        text-align: center;
+    }
+    .qr-code img {
+        max-width: 200px;
+        margin-bottom: 10px;
+    }
+    .qr-code p {
+        font-size: 14px;
+        color: #777;
+    }
+    .back-button {
+        display: inline-block;
+        margin-top: 20px;
+        padding: 10px 20px;
+        background-color: #3498db;
+        color: white;
+        text-decoration: none;
+        border-radius: 4px;
+        transition: background-color 0.2s;
+    }
+    .back-button:hover {
+        background-color: #2980b9;
+    }
+    .loading {
+        text-align: center;
+        padding: 50px;
+        font-size: 18px;
+        color: #777;
+    }
+    .error {
+        text-align: center;
+        padding: 20px;
+        color: #e74c3c;
+    }   
+    </style>
+    <title>画像詳細</title>
+</head>
+<body>
+    <div class="container">
+        <h1>画像詳細</h1>
+        <div id="image-detail" class="image-detail">
+            <div class="loading">画像を読み込み中...</div>
+        </div>
+        <div class="text-center">
+            <a href="index.html" class="back-button">ギャラリーに戻る</a>
+        </div>
+    </div>
+
+    <script>
+        // API Gateway エンドポイントのURL (CloudFormation の Output ApiEndpoint から取得)
+        const API_ENDPOINT = '<replace your api endpoint>';
+        // S3 静的ウェブホスティングのエンドポイント URL (CloudFormation の Output "WebsiteURL" から取得)
+        const S3_WEB_ENDPOINT = '<replace your s3 static website endpoint>';
+        
+        // URLからimageIdを取得する関数
+        function getImageIdFromUrl() {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get('id');
+        }
+        
+        // 画像データを取得する関数
+        async function fetchImageDetail() {
+            const imageId = getImageIdFromUrl();
+            const detailElement = document.getElementById('image-detail');
+            
+            if (!imageId) {
+                detailElement.innerHTML = `
+                    <div class="error">
+                        <p>画像IDが指定されていません</p>
+                        <p>URLに?id=画像IDを追加してください</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            try {
+                // APIエンドポイントから特定の画像メタデータを取得
+                const response = await fetch(`${API_ENDPOINT}/images/${imageId}`);
+                
+                if (!response.ok) {
+                    throw new Error(`画像データの取得に失敗しました (${response.status})`);
+                }
+                
+                // レスポンスをJSONとして解析
+                const data = await response.json();
+                console.log('API Response:', data);
+                
+                // データの形式に応じて処理を分岐
+                let image;
+                if (data.body && typeof data.body === 'string') {
+                    try {
+                        image = JSON.parse(data.body);
+                    } catch (e) {
+                        console.error('JSON解析エラー:', e);
+                        throw new Error('レスポンスデータの形式が不正です');
+                    }
+                } else if (data.Item) {
+                    // DynamoDB GetItem形式の場合
+                    image = data.Item;
+                } else {
+                    // その他の形式
+                    image = data;
+                }
+                
+                if (!image) {
+                    throw new Error('画像データが見つかりませんでした');
+                }
+                
+                // 画像URLの構築
+                let imageUrl;
+                if (image.s3Path) {
+                    // s3Pathからキーを抽出 (形式によって調整が必要)
+                    let key;
+                    if (image.s3Path.includes('s3://')) {
+                        // s3://bucket-name/path/to/image.jpg 形式の場合
+                        const parts = image.s3Path.split('/');
+                        key = parts.slice(3).join('/');
+                    } else if (image.s3Path.startsWith('/')) {
+                        // /path/to/image.jpg 形式の場合
+                        key = image.s3Path.substring(1);
+                    } else {
+                        // path/to/image.jpg 形式の場合
+                        key = image.s3Path;
+                    }
+                    imageUrl = `${S3_WEB_ENDPOINT}/${key}`;
+                } else if (image.imageUrl) {
+                    // 直接imageUrlが提供されている場合
+                    imageUrl = image.imageUrl;
+                } else {
+                    // フォールバック
+                    imageUrl = 'https://via.placeholder.com/800x600?text=No+Image+URL';
+                }
+                
+                // 日付の処理
+                let uploadDate = '不明';
+                if (image.uploadTimestamp) {
+                    // 数値型のタイムスタンプの場合
+                    if (typeof image.uploadTimestamp === 'number') {
+                        uploadDate = new Date(image.uploadTimestamp * 1000).toLocaleString('ja-JP');
+                    } else {
+                        // 文字列型の場合
+                        uploadDate = new Date(image.uploadTimestamp).toLocaleString('ja-JP');
+                    }
+                }
+                
+                // 画像IDの取得（URLから取得したものを優先）
+                const imageIdForDisplay = imageId || image.imageId || image.id || '';
+                
+                // 詳細表示用のHTMLを構築
+                detailElement.innerHTML = `
+                    <div class="image-container">
+                        <img src="${imageUrl}" alt="画像詳細" onerror="this.onerror=null; this.src='https://via.placeholder.com/800x600?text=画像読み込みエラー';">
+                    </div>
+                    <div class="metadata">
+                        <p><strong>画像ID:</strong> ${imageIdForDisplay}</p>
+                        <p><strong>アップロード日時:</strong> ${uploadDate}</p>
+                        <p><strong>アップロード元:</strong> ${image.uploadedBy || '不明'}</p>
+                        <p><strong>いいね数:</strong> <span class="like-count">${image.likeCount || 0}</span></p>
+                    </div>
+                    <div class="qr-code">
+                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`${API_ENDPOINT}/images/${imageIdForDisplay}/like`)}" alt="いいねQRコード">
+                        <p>QRコードをスキャンして「いいね」する</p>
+                    </div>
+                    <div><input class="like-count" type="range" min="0" max="10" value="${image.likeCount || 0}" disabled="disabled"></div>
+                `;
+                
+            } catch (error) {
+                console.error('Error fetching image detail:', error);
+                detailElement.innerHTML = `
+                    <div class="error">
+                        <p>画像の読み込み中にエラーが発生しました</p>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+        
+        // ページ読み込み時に画像詳細を取得
+        window.onload = fetchImageDetail;
+    </script>
+</body>
+</html>

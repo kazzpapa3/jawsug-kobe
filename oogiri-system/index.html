@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!--    <link rel="stylesheet" href="./css/style.css">-->
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        #gallery {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+        }
+        .image-container {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 15px;
+            width: 300px;
+            transition: transform 0.2s;
+            cursor: pointer;
+        }
+        .image-container:hover {
+            transform: translateY(-5px);
+        }
+        .image-container img {
+            width: 100%;
+            height: auto;
+            border-radius: 4px;
+        }
+        .metadata {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+        .metadata p {
+            margin: 5px 0;
+            color: #555;
+            font-size: 14px;
+        }
+        .like-count {
+            font-weight: bold;
+            color: #e74c3c;
+            font-size: 16px;
+        }
+        .qr-code {
+            margin-top: 15px;
+            text-align: center;
+        }
+        .qr-code p {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #777;
+        }
+        .loading {
+            text-align: center;
+            padding: 50px;
+            font-size: 18px;
+            color: #777;
+        }
+        .error {
+            text-align: center;
+            padding: 20px;
+            color: #e74c3c;
+        }
+        .debug-info {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            display: none;
+        }
+        .view-details {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 5px 10px;
+            background-color: #3498db;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-size: 12px;
+            text-align: center;
+        }
+    </style>
+    <title>画像ギャラリー</title>
+</head>
+<body>
+    <h1>画像ギャラリー</h1>
+    <div id="gallery">
+        <div class="loading">画像を読み込み中...</div>
+    </div>
+    <div id="debug-info" class="debug-info"></div>
+
+    <script>
+        // API Gateway エンドポイントのURL (CloudFormation の Output ApiEndpoint から取得)
+        const API_ENDPOINT = '<replace your api endpoint>';
+        // S3 静的ウェブホスティングのエンドポイント URL (CloudFormation の Output "WebsiteURL" から取得)
+        const S3_WEB_ENDPOINT = '<replace your s3 static website endpoint>';
+        
+        // デバッグ情報を表示する関数
+        function showDebugInfo(info) {
+            const debugElement = document.getElementById('debug-info');
+            debugElement.style.display = 'block';
+            debugElement.textContent = JSON.stringify(info, null, 2);
+        }
+        
+        // 画像データを取得する関数
+        async function fetchImages() {
+            try {
+                // APIエンドポイントから画像メタデータを取得
+                const response = await fetch(`${API_ENDPOINT}/images`);
+
+                if (!response.ok) {
+                    throw new Error(`画像データの取得に失敗しました (${response.status})`);
+                }
+                
+                // レスポンスをJSONとして解析
+                const data = await response.json();
+                
+                // デバッグ用にレスポンスデータを表示
+                console.log('API Response:', data);
+                
+                // データの形式に応じて処理を分岐
+                let images;
+                if (data.body && typeof data.body === 'string') {
+                    // Lambda Proxyインテグレーションの場合、bodyはJSON文字列
+                    try {
+                        images = JSON.parse(data.body);
+                        console.log('パース後のデータ:', images);
+                    } catch (e) {
+                        console.error('JSON解析エラー:', e);
+                        showDebugInfo({error: 'JSON解析エラー', data: data});
+                        throw new Error('レスポンスデータの形式が不正です');
+                    }
+                } else if (Array.isArray(data)) {
+                    // 直接配列が返ってきた場合
+                    images = data;
+                } else if (data.Items && Array.isArray(data.Items)) {
+                    // DynamoDB形式の場合
+                    images = data.Items;
+                } else {
+                    // その他の形式
+                    images = data;
+                    showDebugInfo({info: 'データ形式が予想と異なります', data: data});
+                }
+                
+                const galleryElement = document.getElementById('gallery');
+                galleryElement.innerHTML = ''; // ローディング表示をクリア
+                
+                if (!images || images.length === 0) {
+                    galleryElement.innerHTML = '<p>表示する画像がありません</p>';
+                    return;
+                }
+                
+                // 各画像に対して表示要素を作成
+                images.forEach(image => {
+                    const container = document.createElement('div');
+                    container.className = 'image-container';
+                    
+                    // 画像URLの構築
+                    let imageUrl;
+                    if (image.s3Path) {
+                        // s3Pathからキーを抽出 (形式によって調整が必要)
+                        let key;
+                        if (image.s3Path.includes('s3://')) {
+                            // s3://bucket-name/path/to/image.jpg 形式の場合
+                            const parts = image.s3Path.split('/');
+                            key = parts.slice(3).join('/');
+                        } else if (image.s3Path.startsWith('/')) {
+                            // /path/to/image.jpg 形式の場合
+                            key = image.s3Path.substring(1);
+                        } else {
+                            // path/to/image.jpg 形式の場合
+                            key = image.s3Path;
+                        }
+                        imageUrl = `${S3_WEB_ENDPOINT}/${key}`;
+                        console.log('画像URL構築:', { s3Path: image.s3Path, key, imageUrl });
+                    } else if (image.imageUrl) {
+                        // 直接imageUrlが提供されている場合
+                        imageUrl = image.imageUrl;
+                    } else {
+                        // フォールバック
+                        imageUrl = 'https://via.placeholder.com/300x200?text=No+Image+URL';
+                    }
+                    
+                    // 画像要素
+                    const img = document.createElement('img');
+                    img.src = imageUrl;
+                    img.alt = 'Gallery Image';
+                    img.onerror = () => {
+                        img.src = 'https://via.placeholder.com/300x200?text=画像読み込みエラー';
+                        console.error('画像読み込みエラー:', imageUrl);
+                    };
+                    
+                    // メタデータ表示
+                    const metadata = document.createElement('div');
+                    metadata.className = 'metadata';
+                    
+                    // 日付の処理
+                    let uploadDate = '不明';
+                    if (image.uploadTimestamp) {
+                        // 数値型のタイムスタンプの場合
+                        if (typeof image.uploadTimestamp === 'number') {
+                            uploadDate = new Date(image.uploadTimestamp * 1000).toLocaleString('ja-JP');
+                        } else {
+                            // 文字列型の場合
+                            uploadDate = new Date(image.uploadTimestamp).toLocaleString('ja-JP');
+                        }
+                    }
+                    
+                    // 画像IDの取得
+                    const imageId = image.imageId || image.id || '';
+                    
+                    metadata.innerHTML = `
+                        <p>アップロード: ${uploadDate}</p>
+                        <p>アップロード元: ${image.uploadedBy || '不明'}</p>
+                        <p>いいね数: <span id="like-${imageId}" class="like-count">${image.likeCount || 0}</span></p>
+                    `;
+                    
+                    // QRコード表示
+                    const qrCode = document.createElement('div');
+                    qrCode.className = 'qr-code';
+                    
+                    // QRコードのURLは「いいね」APIを呼び出すURL
+                    const likeUrl = `${API_ENDPOINT}/images/${imageId}/like`;
+                    
+                    qrCode.innerHTML = `
+                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(likeUrl)}" alt="いいねQRコード">
+                        <p>QRコードをスキャンして「いいね」する</p>
+                        <a href="detail.html?id=${imageId}" class="view-details">詳細を見る</a>
+                    `;
+                    
+                    // コンテナをクリックしたときの処理
+                    container.onclick = function(e) {
+                        // QRコードやリンクをクリックした場合はイベントバブリングを停止
+                        if (e.target.tagName === 'A' || e.target.tagName === 'IMG' && e.target.alt === 'いいねQRコード') {
+                            return;
+                        }
+                        window.location.href = `detail.html?id=${imageId}`;
+                    };
+                    
+                    container.appendChild(img);
+                    container.appendChild(metadata);
+                    galleryElement.appendChild(container);
+                });
+            } catch (error) {
+                console.error('Error fetching images:', error);
+                document.getElementById('gallery').innerHTML = `
+                    <div class="error">
+                        <p>画像の読み込み中にエラーが発生しました</p>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+        
+        // ページ読み込み時に画像を取得
+        window.onload = fetchImages;
+    </script>
+</body>
+</html>

@@ -1,0 +1,603 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Image Gallery with Like Feature using S3, DynamoDB, Lambda, and API Gateway'
+
+Parameters:
+  AllowedIAMRoleArn:
+    Type: String
+    Description: ARN of the IAM role allowed to upload images to the S3 bucket
+    Default: '<replace your trusted iam entity arn>'
+  
+  ImageBucketName:
+    Type: String
+    Description: Name of the S3 bucket to store images
+    Default: '<replace your s3 bucket name>'
+
+Resources:
+  # First create the bucket without notification configuration
+  ImageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref ImageBucketName
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - GET
+            AllowedOrigins:
+              - '*'
+            MaxAge: 3000
+      NotificationConfiguration:
+        LambdaConfigurations: 
+          - Event: 's3:ObjectCreated:Put'
+            Function: !GetAtt S3EventProcessorFunction.Arn
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  # S3 bucket policy for website
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ImageBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub 'arn:aws:s3:::${ImageBucket}/*'
+          - Effect: Allow
+            Principal:
+              'AWS': !Ref AllowedIAMRoleArn
+            Action: 
+              - 's3:PutObject'
+              - 's3:PutObjectAcl'
+            Resource: !Sub 'arn:aws:s3:::${ImageBucket}/*'
+
+  ImageMetadataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ImageMetadata
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: imageId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: imageId
+          KeyType: HASH
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:UpdateItem'
+                  - 'dynamodb:Scan'
+                Resource: !GetAtt ImageMetadataTable.Arn
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                Resource: !Sub 'arn:aws:s3:::${ImageBucketName}/*'
+
+  S3EventProcessorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: S3EventProcessor
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import uuid
+          import time
+
+          dynamodb = boto3.resource('dynamodb')
+          table = dynamodb.Table('ImageMetadata')
+
+          def lambda_handler(event, context):
+              # S3イベントからデータを取得
+              bucket = event['Records'][0]['s3']['bucket']['name']
+              key = event['Records'][0]['s3']['object']['key']
+              
+              # アップロード元のIAMエンティティ情報を取得
+              #user_identity = event['Records'][0]['userIdentity']['principalId']
+              userIdentity = event['Records'][0]['userIdentity']['principalId'].split(':')[-1]
+              
+              # 現在のタイムスタンプを取得
+              timestamp = int(time.time())
+              
+              # 一意のIDを生成
+              image_id = str(uuid.uuid4())
+              
+              # DynamoDBにメタデータを保存
+              table.put_item(
+                  Item={
+                      'imageId': image_id,
+                      's3Path': f"s3://{bucket}/{key}",
+                      'uploadedBy': userIdentity,
+                      'uploadTimestamp': timestamp,
+                      'likeCount': 0
+                  }
+              )
+              
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Metadata saved successfully!')
+              }
+      Timeout: 10
+      MemorySize: 128
+
+  S3EventProcessorPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref S3EventProcessorFunction
+      Principal: 's3.amazonaws.com'
+      SourceAccount: !Ref 'AWS::AccountId'
+      SourceArn: !Sub 'arn:aws:s3:::${ImageBucketName}'
+
+  GetImagesFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: GetImages
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+           import boto3
+           import json
+           from decimal import Decimal
+
+           dynamodb = boto3.resource('dynamodb')
+           table = dynamodb.Table('ImageMetadata')
+
+           # Decimal型をJSONにシリアライズするためのカスタムエンコーダ
+           class DecimalEncoder(json.JSONEncoder):
+               def default(self, obj):
+                   if isinstance(obj, Decimal):
+                       return float(obj)
+                   return super(DecimalEncoder, self).default(obj)
+
+           def lambda_handler(event, context):
+               # DynamoDBから全ての画像メタデータを取得
+               response = table.scan()
+
+               return {
+                   'statusCode': 200,
+                   'headers': {
+                       'Access-Control-Allow-Origin': '*',
+                       'Content-Type': 'application/json'
+                   },
+                   'body': json.dumps(response['Items'], cls=DecimalEncoder)
+               }
+      Timeout: 10
+      MemorySize: 128
+
+  GetSingleImageFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: GetSingleImage
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          from decimal import Decimal
+
+          dynamodb = boto3.resource('dynamodb')
+          table = dynamodb.Table('ImageMetadata')
+
+          # Decimal型をJSONにシリアライズするためのカスタムエンコーダ
+          class DecimalEncoder(json.JSONEncoder):
+              def default(self, obj):
+                  if isinstance(obj, Decimal):
+                      return float(obj)
+                  return super(DecimalEncoder, self).default(obj)
+
+          def lambda_handler(event, context):
+              try:
+                  # パスパラメータから画像IDを取得
+                  image_id = event['pathParameters']['imageId']
+                  
+                  # DynamoDBから特定の画像データを取得
+                  response = table.get_item(
+                      Key={
+                          'imageId': image_id
+                      }
+                  )
+                  
+                  # 画像が見つからない場合
+                  if 'Item' not in response:
+                      return {
+                          'statusCode': 404,
+                          'headers': {
+                              'Access-Control-Allow-Origin': '*',
+                              'Content-Type': 'application/json'
+                          },
+                          'body': json.dumps({'message': 'Image not found'})
+                      }
+                  
+                  # レスポンスを返す
+                  return {
+                      'statusCode': 200,
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*',
+                          'Content-Type': 'application/json'
+                      },
+                      'body': json.dumps(response['Item'], cls=DecimalEncoder)
+                  }
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*',
+                          'Content-Type': 'application/json'
+                      },
+                      'body': json.dumps({'message': f'Error retrieving image data: {str(e)}'})
+                  }
+      Timeout: 10
+      MemorySize: 128
+
+  LikeImageFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: LikeImage
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          from boto3.dynamodb.conditions import Key
+          from decimal import Decimal
+
+          dynamodb = boto3.resource('dynamodb')
+          table = dynamodb.Table('ImageMetadata')
+
+          # Decimal型をJSONにシリアライズするためのカスタムエンコーダ
+          class DecimalEncoder(json.JSONEncoder):
+              def default(self, obj):
+                  if isinstance(obj, Decimal):
+                      return float(obj)
+                  return super(DecimalEncoder, self).default(obj)
+
+          def lambda_handler(event, context):
+              try:
+                  # パスパラメータからimageIdを取得
+                  image_id = event['pathParameters']['imageId']
+                  
+                  # DynamoDBの「いいね」カウントを更新
+                  response = table.update_item(
+                      Key={
+                          'imageId': image_id
+                      },
+                      UpdateExpression="SET likeCount = if_not_exists(likeCount, :zero) + :val",
+                      ExpressionAttributeValues={
+                          ':val': 1,
+                          ':zero': 0
+                      },
+                      ReturnValues="UPDATED_NEW"
+                  )
+                  
+                  # 更新後の「いいね」カウントを返す
+                  return {
+                      'statusCode': 200,
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*',
+                          'Content-Type': 'application/json'
+                      },
+                      'body': json.dumps({
+                          'imageId': image_id,
+                          'likeCount': int(response['Attributes']['likeCount'])
+                      }, cls=DecimalEncoder)
+                  }
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*',
+                          'Content-Type': 'application/json'
+                      },
+                      'body': json.dumps({'message': f'Error updating like count: {str(e)}'})
+                  }
+      Timeout: 10
+      MemorySize: 128
+
+  # API Gateway REST API
+  ImageGalleryApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: ImageGalleryApi
+      Description: API for Image Gallery with Like functionality
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # API Gateway resource for images
+  ImagesResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ImageGalleryApi
+      ParentId: !GetAtt ImageGalleryApi.RootResourceId
+      PathPart: 'images'
+
+  # API Gateway GET method for listing images
+  GetImagesMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ImageGalleryApi
+      ResourceId: !Ref ImagesResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetImagesFunction.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # CORS for images resource
+  ImagesOptionMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ImageGalleryApi
+      ResourceId: !Ref ImagesResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # API Gateway resource for specific image
+  ImageResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ImageGalleryApi
+      ParentId: !Ref ImagesResource
+      PathPart: '{imageId}'
+
+  # API Gateway GET method for single image
+  GetSingleImageMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ImageGalleryApi
+      ResourceId: !Ref ImageResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetSingleImageFunction.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # CORS for single image resource
+  ImageOptionMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ImageGalleryApi
+      ResourceId: !Ref ImageResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # API Gateway resource for like action
+  LikeResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ImageGalleryApi
+      ParentId: !Ref ImageResource
+      PathPart: 'like'
+
+  # API Gateway POST method for like action
+  LikeImageMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ImageGalleryApi
+      ResourceId: !Ref LikeResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LikeImageFunction.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # API Gateway GET method for like action (for QR code scanning)
+  LikeImageGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ImageGalleryApi
+      ResourceId: !Ref LikeResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LikeImageFunction.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # CORS for like resource
+  LikeOptionMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ImageGalleryApi
+      ResourceId: !Ref LikeResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # API Gateway deployment
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetImagesMethod
+      - GetSingleImageMethod
+      - LikeImageMethod
+      - LikeImageGetMethod
+      - ImagesOptionMethod
+      - ImageOptionMethod
+      - LikeOptionMethod
+    Properties:
+      RestApiId: !Ref ImageGalleryApi
+      StageName: 'prod'
+
+  # Lambda permissions for API Gateway
+  GetImagesPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref GetImagesFunction
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ImageGalleryApi}/*/GET/images'
+
+  GetSingleImagePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref GetSingleImageFunction
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ImageGalleryApi}/*/GET/images/{imageId}'
+
+  LikeImagePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref LikeImageFunction
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ImageGalleryApi}/*/POST/images/{imageId}/like'
+
+  LikeImageGetPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref LikeImageFunction
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ImageGalleryApi}/*/GET/images/{imageId}/like'
+
+Outputs:
+  ImageBucketName:
+    Description: 'Name of the S3 bucket where images are stored'
+    Value: !Ref ImageBucket
+
+  DynamoDBTableName:
+    Description: 'Name of the DynamoDB table storing image metadata'
+    Value: !Ref ImageMetadataTable
+
+  ApiEndpoint:
+    Description: 'URL of the API Gateway endpoint'
+    Value: !Sub 'https://${ImageGalleryApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+
+  WebsiteURL:
+    Description: 'URL of the S3 website'
+    Value: !Sub 'http://${ImageBucket}.s3-website-${AWS::Region}.amazonaws.com'

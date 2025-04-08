@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>いいね成功</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+            text-align: center;
+        }
+        .container {
+            max-width: 600px;
+            margin: 50px auto;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+        }
+        h1 {
+            color: #2ecc71;
+            margin-bottom: 20px;
+        }
+        .success-icon {
+            font-size: 80px;
+            color: #2ecc71;
+            margin-bottom: 20px;
+        }
+        p {
+            font-size: 18px;
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+        .buttons {
+            margin-top: 30px;
+        }
+        .button {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #3498db;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            margin: 0 10px;
+            transition: background-color 0.2s;
+        }
+        .button:hover {
+            background-color: #2980b9;
+        }
+        .image-preview {
+            margin: 20px 0;
+            max-width: 300px;
+            max-height: 200px;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="success-icon">✓</div>
+        <h1>いいねしました！</h1>
+        <p>あなたの「いいね」が正常に登録されました。</p>
+        <div id="image-info">
+            <!-- 画像情報がここに表示されます -->
+        </div>
+        <div class="buttons">
+            <a href="index.html" class="button">ギャラリーに戻る</a>
+            <a href="#" id="view-detail" class="button">画像の詳細を見る</a>
+        </div>
+    </div>
+
+    <script>
+        // API Gateway エンドポイントのURL (CloudFormation の Output ApiEndpoint から取得)
+        const API_ENDPOINT = '<replace your api endpoint>';
+        // S3 静的ウェブホスティングのエンドポイント URL (CloudFormation の Output "WebsiteURL" から取得)
+        const S3_WEB_ENDPOINT = '<replace your s3 static website endpoint>';
+        
+        // URLからimageIdを取得する関数
+        function getImageIdFromUrl() {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get('id');
+        }
+        
+        // 画像情報を取得して表示する関数
+        async function fetchImageInfo() {
+            const imageId = getImageIdFromUrl();
+            const imageInfoElement = document.getElementById('image-info');
+            const viewDetailButton = document.getElementById('view-detail');
+            
+            if (!imageId) {
+                imageInfoElement.innerHTML = '<p>画像情報を取得できませんでした</p>';
+                viewDetailButton.style.display = 'none';
+                return;
+            }
+            
+            viewDetailButton.href = `detail.html?id=${imageId}`;
+            
+            try {
+                // APIエンドポイントから画像メタデータを取得
+                const response = await fetch(`${API_ENDPOINT}/images/${imageId}`);
+                
+                if (!response.ok) {
+                    throw new Error('画像情報の取得に失敗しました');
+                }
+                
+                // レスポンスをJSONとして解析
+                const data = await response.json();
+                
+                // データの形式に応じて処理を分岐
+                let image;
+                if (data.body && typeof data.body === 'string') {
+                    try {
+                        image = JSON.parse(data.body);
+                    } catch (e) {
+                        console.error('JSON解析エラー:', e);
+                        throw new Error('レスポンスデータの形式が不正です');
+                    }
+                } else if (data.Item) {
+                    // DynamoDB GetItem形式の場合
+                    image = data.Item;
+                } else {
+                    // その他の形式
+                    image = data;
+                }
+                
+                if (!image) {
+                    throw new Error('画像データが見つかりませんでした');
+                }
+                
+                // 画像URLの構築
+                let imageUrl;
+                if (image.s3Path) {
+                    // s3Pathからキーを抽出
+                    let key;
+                    if (image.s3Path.includes('s3://')) {
+                        const parts = image.s3Path.split('/');
+                        key = parts.slice(3).join('/');
+                    } else if (image.s3Path.startsWith('/')) {
+                        key = image.s3Path.substring(1);
+                    } else {
+                        key = image.s3Path;
+                    }
+                    imageUrl = `${CLOUDFRONT_DOMAIN}/${key}`;
+                } else if (image.imageUrl) {
+                    imageUrl = image.imageUrl;
+                }
+                
+                // 画像情報を表示
+                if (imageUrl) {
+                    imageInfoElement.innerHTML = `
+                        <img src="${imageUrl}" alt="いいねした画像" class="image-preview" onerror="this.style.display='none';">
+                        <p>現在のいいね数: <strong>${image.likeCount || 1}</strong></p>
+                    `;
+                } else {
+                    imageInfoElement.innerHTML = `
+                        <p>現在のいいね数: <strong>${image.likeCount || 1}</strong></p>
+                    `;
+                }
+                
+            } catch (error) {
+                console.error('Error fetching image info:', error);
+                imageInfoElement.innerHTML = `<p>画像情報の取得中にエラーが発生しました</p>`;
+            }
+        }
+        
+        // ページ読み込み時に画像情報を取得
+        window.onload = fetchImageInfo;
+    </script>
+</body>
+</html>
