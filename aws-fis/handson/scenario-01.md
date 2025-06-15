@@ -22,7 +22,7 @@ AWS FIS によって引き起こされる事象を喰らう環境として、粗
 
 #### マネジメントコンソールでの操作
 
-1. [init.yaml](./init.yaml) をダウンロードしておきます
+1. [init.yaml](https://raw.githubusercontent.com/kazzpapa3/jawsug-kobe/refs/heads/main/aws-fis/init.yaml) をダウンロードしておきます
 2. AWS マネジメントコンソールより CloudFormation へ遷移します。  
     なお、東京リージョン（ap-northeast-1）で実行されることを期待するテンプレートとなるため、リージョンが東京リージョン（ap-northeast-1）であることを合わせて確認します
 3. 「スタックの作成」から「テンプレートの指定」を「テンプレートファイルのアップロード」とした上で ＜1＞ でダウンロードしたテンプレートをアップロードします

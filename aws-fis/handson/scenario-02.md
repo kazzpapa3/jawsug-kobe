@@ -131,7 +131,7 @@ aws fis create-experiment-template \
 
 #### AWS 側の変更
 
-1. [changeset.yaml](https://github.com/kazzpapa3/jawsug-kobe/blob/main/aws-fis/handson/changeset.yaml) をダウンロードします
+1. [changeset.yaml](https://raw.githubusercontent.com/kazzpapa3/jawsug-kobe/refs/heads/main/aws-fis/changeset.yaml) をダウンロードします
 2. CloudFormation スタックを選択し「スタックの更新」プルダウンから「変更セットを作成」をクリックします
 3. 「前提条件 - テンプレートの準備」を「既存のテンプレートを置換」とし、「テンプレートの指定」を「テンプレートファイルのアップロード」とした上で ＜1＞ でダウンロードした CloudFormation テンプレートをアップロードし、「次へ」ボタンをクリックします
 4. 遷移した「変更セットの詳細を指定」ページは変更せず、ページ下部の「次へ」ボタンをクリックします
