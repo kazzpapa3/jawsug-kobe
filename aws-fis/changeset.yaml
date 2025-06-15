@@ -303,6 +303,19 @@ Resources:
         - Key: Name
           Value: !Sub ${AWS::StackName}-Aurora-Instance
 
+  # Aurora Serverless v2 Instance
+  AuroraDBReaderInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub ${DBClusterIdentifier}-reader
+      DBClusterIdentifier: !Ref AuroraDBCluster
+      Engine: aurora-mysql
+      DBInstanceClass: db.serverless
+      PubliclyAccessible: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-Aurora-Reader-Instance
+
   # EC2 Security Group
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -472,6 +485,18 @@ Outputs:
     Value: !GetAtt AuroraDBCluster.Endpoint.Port
     Export:
       Name: !Sub ${AWS::StackName}-AuroraPort
+
+  AuroraReaderInstanceId:
+    Description: Aurora Reader Instance ID
+    Value: !Ref AuroraDBReaderInstance
+    Export:
+      Name: !Sub ${AWS::StackName}-AuroraReaderInstanceId
+
+  AuroraClusterReaderEndpoint:
+    Description: Aurora Cluster Reader Endpoint
+    Value: !GetAtt AuroraDBCluster.ReadEndpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}-AuroraClusterReaderEndpoint
 
   EC2InstanceId:
     Description: EC2 Instance ID

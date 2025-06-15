@@ -1,4 +1,4 @@
-# 障害は忘れた頃にやってくる「AWS Fault Injection Service」で障害を食らってみよう / AWS FIS の設定と実験１
+# 障害は忘れた頃にやってくる「AWS Fault Injection Service」で障害を食らってみよう / AWS FIS の設定と実験 1
 
 JAWS-UG 神戸 #7 で実施予定の AWS Fault Injection Service ハンズオン用シナリオです。
 
@@ -103,120 +103,93 @@ aws fis create-experiment-template \
 
 #### 補足
 
-
 <details><summary>マネジメントコンソールで実施する場合は以下となります。</summary>
 
 あとでかく
 
 </details>
 
+## 実験の実施（1回目）
 
-### 実験の実施
+### 実験の操作
 
+1. AWS マネジメントコンソールで  [AWS FIS](https://ap-northeast-1.console.aws.amazon.com/fis/home?region=ap-northeast-1#Home) → [実験テンプレート](https://ap-northeast-1.console.aws.amazon.com/fis/home?region=ap-northeast-1#ExperimentTemplates) ページへ遷移します
+2. 「Reboot RDS」として作成されているテンプレートにチェックを入れ「実験を開始」ボタンをクリックします
+3. 「実験を開始EXTxxxxxxxx」のページへ遷移したら「実験を開始」ボタンをクリックします
 
+> [!Tips]
+> 実行する実験に「タグ」をつけることも可能です
 
+### 挙動の確認（想定）
 
+- WordPress サイト側が「データベース接続エラー」とななる
+- AWS マネジメントコンソール「Aurora and RDS」ページのデータベース一覧で DB 識別子「aurora-serverless-cluster-instance」が再起動中となる
 
-### 実験
+## 実験の実施（2回目）
 
-### 実験テンプレートを作成する
+### 構成の変更
 
-```bash
-ROLE_ARN_FOR_FIS=$(aws iam get-role --role-name FISServiceRole --query 'Role.Arn' --output text)
-cat << EOF > fis-experiment-template.json
-{
-        "description": "1 つ以上のインスタンスを 2 分間停止します",
-        "targets": {
-                "TaggedInstances": {
-                        "resourceType": "aws:ec2:instance",
-                        "resourceTags": {
-                                "Name": "fis-EC2-Instance"
-                        },
-                        "filters": [
-                                {
-                                        "path": "State.Name",
-                                        "values": [
-                                                "running"
-                                        ]
-                                }
-                        ],
-                        "selectionMode": "COUNT(1)"
-                }
-        },
-        "actions": {
-                "StopAction": {
-                        "actionId": "aws:ec2:stop-instances",
-                        "description": "特定のタグを持つインスタンスを対象にする",
-                        "parameters": {
-                                "startInstancesAfterDuration": "PT2M"
-                        },
-                        "targets": {
-                                "Instances": "TaggedInstances"
-                        }
-                }
-        },
-        "stopConditions": [
-                {
-                        "source": "none"
-                }
-        ],
-        "roleArn": "${ROLE_ARN_FOR_FIS}",
-        "tags": {},
-        "experimentOptions": {
-                "accountTargeting": "single-account",
-                "emptyTargetResolutionMode": "fail"
-        }
-}
-EOF
+#### AWS 側の変更
 
-aws fis create-experiment-template \
-    --cli-input-json file://fis-experiment-template.json
-```
+1. [changeset.yaml](https://github.com/kazzpapa3/jawsug-kobe/blob/main/aws-fis/handson/changeset.yaml) をダウンロードします
+2. CloudFormation スタックを選択し「スタックの更新」プルダウンから「変更セットを作成」をクリックします
+3. 「前提条件 - テンプレートの準備」を「既存のテンプレートを置換」とし、「テンプレートの指定」を「テンプレートファイルのアップロード」とした上で ＜1＞ でダウンロードした CloudFormation テンプレートをアップロードし、「次へ」ボタンをクリックします
+4. 遷移した「変更セットの詳細を指定」ページは変更せず、ページ下部の「次へ」ボタンをクリックします
+5. 「変更セットオプションを設定 - オプション」ページ下部の「AWS CloudFormation によって IAM リソースが作成される場合があることを承認します。」にチェックを入れ「次へ」をクリックし、次画面で「送信」ボタンをクリックします
+6. 「変更セット」の詳細画面に遷移したのち、「変更セットを実行」ボタンが活性化するまでを待機します。（待機時間は約 2 分）
+7. そのまま「変更セットを実行」ボタンをクリックし、表示されるダイアログも変更せずそのまま「変更セットを実行」ボタンをクリックします（このあと 15 分ほど時間を要します）
+8. スタックのステータスが「UPDATE_COMPLETE」となったことを確認し、「出力」タブから `AuroraClusterReaderEndpoint` の値を控えておきます
 
-## 環境の作り替え
+#### WordPress 側の変更
 
+CloudShell で以下のように実行します。
 
-### EC2 インスタンスへの接続
-
-AWS マネジメントコンソールから CloudShell を起動し、以下のコマンドを実行します
+##### Webサーバへの接続まで
 
 ```bash
 KEY_NAME=$(aws ssm describe-parameters --query "Parameters[?contains(Name, 'keypair')].Name" --output text)
 aws ssm get-parameters --names "${KEY_NAME}" --with-decryption --query "Parameters[].Value" --output text > key.pem
 chmod 400 key.pem
 PUBLIC_IP=$(aws ec2 describe-instances   --filters "Name=instance-state-name,Values=running"   --query 'Reservations[].Instances[?contains(Tags[?Key==`Name`].Value | [0], `-EC2-Instance`)][].NetworkInterfaces[].Association.PublicIp' --output text)
-ssh -i key.pem ec2-user@"${PUBLIC_IP}cd /var/www/html/"
+ssh -i key.pem ec2-user@"${PUBLIC_IP}"
 ```
 
-### WordPres 設定の変更
+##### Webサーバへの接続後、インスタンス内部での操作
 
 ```bash
 cd /var/www/html/
-GLOBAL_IP=$(curl inet-ip.info)
-wp option update home "http://${GLOBAL_IP}"
-wp option update siteurl "http://${GLOBAL_IP}"
+wp plugin install https://github.com/stuttter/ludicrousdb/archive/refs/heads/master.zip
+cp wp-content/plugins/ludicrousdb/ludicrousdb/drop-ins/db.php wp-content/
+cp wp-content/plugins/ludicrousdb/ludicrousdb/drop-ins/db-error.php wp-content/
+cp wp-content/plugins/ludicrousdb/ludicrousdb/drop-ins/db-config.php .
+
+vi db-config.php
+# 108行目付近を以下のように書き換える
+-                 'host'     => DB_HOST,     // If port is other than 3306, use host:port.
++                 'host' => '{前工程で控えた AuroraClusterReaderEndpoint の値}',
 ```
 
+##### WordPress 側でのプラグインの有効化
 
+1. WordPress の管理画面へアクセスする。（この手順に沿っていれば http://${CloudFormation の出力タブの EC2PublicIP の値}/wp-admin/ のはず）
+2. 左サイドナビから「プラグイン」リンクをクリックする
+3. 一覧表示の中の「LudicrousDB」の「有効化」リンクをクリックする
 
+### 実験の操作
 
+1. AWS マネジメントコンソールで  [AWS FIS](https://ap-northeast-1.console.aws.amazon.com/fis/home?region=ap-northeast-1#Home) → [実験テンプレート](https://ap-northeast-1.console.aws.amazon.com/fis/home?region=ap-northeast-1#ExperimentTemplates) ページへ遷移します
+2. 「Reboot RDS」として作成されているテンプレートにチェックを入れ「実験を開始」ボタンをクリックします
+3. 「実験を開始EXTxxxxxxxx」のページへ遷移したら「実験を開始」ボタンをクリックします
 
-### CloudWatch ダッシュボードの作成
+### 挙動の確認（想定）
 
-```bash
-aws cloudwatch put-dashboard \
-    --dashboard-name FIS \
-    --dashboard-body '{"widgets":[{"height":6,"width":6,"y":0,"x":0,"type":"metric","properties":{"view":"timeSeries","stacked":false,"metrics":[["Namespace","CPUUtilization","Environment","Prod","Type","App"]],"region":"ap-notheast-1"}}]}'
-```
+- AWS マネジメントコンソール「Aurora and RDS」ページのデータベース一覧で DB 識別子「aurora-serverless-cluster-instance」が再起動中となるものの、WordPress サイト側が「データベース接続エラー」とならず影響を受けない
 
+> [!Note]
+> 余裕があれば、該当のデータベースを選択し「アクション」プルダウンより「フェイルオーバー」を選択して、フェイルオーバーを発生させリーダーとライターのインスタンスの AZ を入れ替えてみてください。  
+> その上で、再度実験をしても Web サイトの読み取りアクセスにはエラーが起きないはずです。
 
+---
 
+[AWS FIS の設定と実験 2](./scenario-03.md) へ
 
-
-aws iam attach-role-policy \
-  --role-name FISServiceRole \
-  --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess
-
-aws iam attach-role-policy \
-  --role-name FISServiceRole \
-  --policy-arn arn:aws:iam::aws:policy/CloudWatchFullAccessV2
