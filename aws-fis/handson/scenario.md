@@ -157,6 +157,16 @@ aws fis create-experiment-template \
     --cli-input-json file://fis-experiment-template-for-rds.json
 ```
 
+#### 補足
+
+
+<details><summary>マネジメントコンソールで実施する場合は以下となります。</summary>
+
+あとでかく
+
+</details>
+
+
 ### 実験の実施
 
 
