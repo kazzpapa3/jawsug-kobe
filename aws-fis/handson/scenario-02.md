@@ -156,8 +156,8 @@ CloudFormation スタックの変更セットを作成し、DB をマルチ AZ �
 ```bash
 wget https://raw.githubusercontent.com/kazzpapa3/jawsug-kobe/refs/heads/main/aws-fis/changeset.yaml
 aws cloudformation create-change-set --change-set-name multi-az-db-instance --stack-name init --template-body file://changeset.yaml --capabilities CAPABILITY_IAM
-
 CHANGESET_ARN_FOR_MULTI_AZ_DB_INSTANCE=$(aws cloudformation list-change-sets --stack-name init --query "Summaries[?contains(ChangeSetName,'multi-az-db-instance')].ChangeSetId" --output text)
+aws cloudformation wait change-set-create-complete --change-set-name ${CHANGESET_ARN_FOR_MULTI_AZ_DB_INSTANCE}
 aws cloudformation execute-change-set --change-set-name ${CHANGESET_ARN_FOR_MULTI_AZ_DB_INSTANCE}
 ```
 
