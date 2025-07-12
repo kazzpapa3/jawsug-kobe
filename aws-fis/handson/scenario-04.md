@@ -88,4 +88,4 @@ CloudShell を起動し以下の通りコマンドを実行する
 
 今回のハンズオンで概要を掴んでいただいて、より実践的なシナリオへの挑戦をいただけると良いかと思いました。（神戸でもまたハンズオンをやってみたいですね。障害は忘れた頃にやってくるので、今回のハンズオンを忘れた頃にでも…）
 
-<a href="https://workshops.aws/card/fault"><img src="../images/fis-workshop-v2-introduce.png")</a>
+<a href="https://workshops.aws/card/fault"><img src="./images/fis-workshop-v2-introduce.png"></a>
