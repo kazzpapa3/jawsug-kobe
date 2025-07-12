@@ -60,6 +60,7 @@ AWS マネジメントコンソールで CloudShell を起動し、以下のコ�
 ```bash
 DB_INSTANCE_AZ=$(aws rds describe-db-instances --query "DBInstances[?DBInstanceIdentifier=='aurora-serverless-cluster-instance'].AvailabilityZone" --output text)
 ROLE_ARN_FOR_FIS=$(aws iam get-role --role-name FISServiceRole --query 'Role.Arn' --output text)
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output text)
 cat << EOF > fis-experiment-template-for-rds.json
 {
     "description": "Reboot RDS",
@@ -88,7 +89,7 @@ cat << EOF > fis-experiment-template-for-rds.json
             "source": "none"
         }
     ],
-    "roleArn": "arn:aws:iam::720791945764:role/FISServiceRole",
+    "roleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/FISServiceRole",
     "tags": {},
     "experimentOptions": {
         "accountTargeting": "single-account",
@@ -105,7 +106,26 @@ aws fis create-experiment-template \
 
 <details><summary>マネジメントコンソールで実施する場合は以下となります。</summary>
 
-あとでかく
+1. AWS マネジメントコンソールで  [AWS FIS](https://ap-northeast-1.console.aws.amazon.com/fis/home?region=ap-northeast-1#Home) → [実験テンプレート](https://ap-northeast-1.console.aws.amazon.com/fis/home?region=ap-northeast-1#ExperimentTemplates) ページへ遷移します
+2. ページ右上にある「実験テンプレートを作成」ボタンをクリックします
+3. 遷移した先の「テンプレートの詳細を指定」ページを以下の要領で入力します
+    - 説明：「Reboot RDS」とします
+    - 名前 - オプション：入力なしで可です
+    - 実験タイプ：「アカウントターゲティング」は「この AWS アカウント:〜」のままとします
+4. 画面右側のターゲットから「ターゲットを追加」をクリックし、以下の要領で入力し「次へ」ボタンをクリックします  ![scenario-02-01](images/scenario-02-01.png)
+    - 名前：`DBInstances-Target-1`
+    - リソースタイプ：`aws:rds:db`
+    - ターゲットメソッド：`リソースタグ、フィルター、パラメータ`
+    - リソースパラメータ：「Availability Zone identifiers」として `ap-northeast-1a` を選択する
+    - リソースフィルター：「選択モード」を `すべて` とする
+5. 画面左側のアクションから「アクションを追加」をクリックし、以下の要領で入力し「次へ」ボタンをクリックします  ![scenario-02-02](images/scenario-02-02.png)
+   - 名前：`RDS`
+   - アクションタイプ：プルダウンは「すべて」のまま `aws:rds:reboot-db-instances` とします
+   - ターゲット：＜4＞ で作成した `DBInstances-Target-1` を選択
+6. 「アクションとターゲット」画面で、手順4、手順5で作成したアクションとターゲットがつながっていることを確認し「次へ」ボタンをクリックします  ![scenario-02-03](images/scenario-02-03.png)
+7. 遷移した先の「サービスアクセスの設定」ページででサービスアクセスとして「既存の IAM ロールを使用する」を選択し、IAM ロールに `FISServiceRole` を選択して「次へ」ボタンをクリックします  ![scenario-02-04](images/scenario-02-04.png)
+8. 遷移した先の「オプション設定を行う」ページではデフォルトのまま「次へ」ボタンをクリックします
+9. 遷移した先の「確認して作成」ページで内容を確認し、ページ最下部の「実験テンプレートを作成」ボタンをクリックします
 
 </details>
 
@@ -131,6 +151,18 @@ aws fis create-experiment-template \
 
 #### AWS 側の変更
 
+CloudFormation スタックの変更セットを作成し、DB をマルチ AZ 化します。
+
+```bash
+wget https://raw.githubusercontent.com/kazzpapa3/jawsug-kobe/refs/heads/main/aws-fis/changeset.yaml
+aws cloudformation create-change-set --change-set-name multi-az-db-instance --stack-name init --template-body file://changeset.yaml --capabilities CAPABILITY_IAM
+
+CHANGESET_ARN_FOR_MULTI_AZ_DB_INSTANCE=$(aws cloudformation list-change-sets --stack-name init --query "Summaries[?contains(ChangeSetName,'multi-az-db-instance')].ChangeSetId" --output text)
+aws cloudformation execute-change-set --change-set-name ${CHANGESET_ARN_FOR_MULTI_AZ_DB_INSTANCE}
+```
+
+<details><summary>マネジメントコンソールで実施する場合は以下となります。</summary>
+
 1. [changeset.yaml](https://raw.githubusercontent.com/kazzpapa3/jawsug-kobe/refs/heads/main/aws-fis/changeset.yaml) をダウンロードします
 2. CloudFormation スタックを選択し「スタックの更新」プルダウンから「変更セットを作成」をクリックします
 3. 「前提条件 - テンプレートの準備」を「既存のテンプレートを置換」とし、「テンプレートの指定」を「テンプレートファイルのアップロード」とした上で ＜1＞ でダウンロードした CloudFormation テンプレートをアップロードし、「次へ」ボタンをクリックします
@@ -140,8 +172,11 @@ aws fis create-experiment-template \
 7. そのまま「変更セットを実行」ボタンをクリックし、表示されるダイアログも変更せずそのまま「変更セットを実行」ボタンをクリックします（このあと 15 分ほど時間を要します）
 8. スタックのステータスが「UPDATE_COMPLETE」となったことを確認し、「出力」タブから `AuroraClusterReaderEndpoint` の値を控えておきます
 
+</details>
+
 #### WordPress 側の変更
 
+WordPress の LudicrousDB プラグインを活用し、CRUD の性質によってアクセス先の DB エンドポイントの変更をします。
 CloudShell で以下のように実行します。
 
 ##### Webサーバへの接続まで
@@ -162,7 +197,11 @@ wp plugin install https://github.com/stuttter/ludicrousdb/archive/refs/heads/mas
 cp wp-content/plugins/ludicrousdb/ludicrousdb/drop-ins/db.php wp-content/
 cp wp-content/plugins/ludicrousdb/ludicrousdb/drop-ins/db-error.php wp-content/
 cp wp-content/plugins/ludicrousdb/ludicrousdb/drop-ins/db-config.php .
+```
 
+db-config.php の 108行目付近を以下のように書き換えます。
+
+```
 vi db-config.php
 # 108行目付近を以下のように書き換える
 -                 'host'     => DB_HOST,     // If port is other than 3306, use host:port.
